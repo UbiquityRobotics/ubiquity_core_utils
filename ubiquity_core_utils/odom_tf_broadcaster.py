@@ -27,6 +27,7 @@ class OdomTFBroadcaster(Node):
     def publish_avg(self):
         if not self.msgs: return
         avg = Odometry()
+        avg.pose.pose.orientation.w = 0.0
         avg.header.stamp, avg.header.frame_id, avg.child_frame_id = self.get_clock().now().to_msg(), 'odom', 'base_link'
         
         for m in self.msgs.values():
