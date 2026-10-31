@@ -1,0 +1,119 @@
+name: Release Debian Package
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag Name (e.g. v1.0.0 or latest)'
+        required: false
+        default: 'latest'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build & Release Debian Package (all)
+    runs-on: ubuntu-latest
+    container:
+      image: ros:jazzy-ros-base
+
+    steps:
+      - name: Install Prerequisites
+        run: |
+          apt-get update
+          apt-get install -y python3-colcon-common-extensions dpkg
+
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Determine Package Version
+        id: vars
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && -n "${{ inputs.tag_name }}" ]]; then
+            RAW_VERSION="${{ inputs.tag_name }}" 
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            RAW_VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            RAW_VERSION="${GITHUB_REF_NAME}"
+          fi
+
+          # Debian Policy §5.6.12 requires version to start with a digit
+          CLEAN_VERSION=$(echo "${RAW_VERSION}" | sed -E 's/^[^0-9]*//')
+          [[ -z "${CLEAN_VERSION}" || "${RAW_VERSION}" == "latest" ]] && CLEAN_VERSION="1.0.0-latest"
+
+          echo "tag=${RAW_VERSION}" >> $GITHUB_OUTPUT
+          echo "clean_version=${CLEAN_VERSION}" >> $GITHUB_OUTPUT
+          echo "deb_file=ros-jazzy-ubiquity-core-utils_${CLEAN_VERSION}_all.deb" >> $GITHUB_OUTPUT
+          echo "Resolved tag: ${RAW_VERSION} -> clean version: ${CLEAN_VERSION}"
+
+      - name: Build and Install into Packaging Root
+        run: |
+          source /opt/ros/jazzy/setup.bash
+          mkdir -p /tmp/pkg-root/opt/ros/jazzy
+
+          colcon build \
+            --merge-install \
+            --install-base /tmp/pkg-root/opt/ros/jazzy
+
+      - name: Assemble Debian Package
+        env:
+          CLEAN_VERSION: ${{ steps.vars.outputs.clean_version }}
+          DEB_FILE: ${{ steps.vars.outputs.deb_file }}
+        run: |
+          # 1. Clean colcon workspace scripts to avoid dpkg collisions
+          rm -f /tmp/pkg-root/opt/ros/jazzy/setup.* \
+                /tmp/pkg-root/opt/ros/jazzy/local_setup.* \
+                /tmp/pkg-root/opt/ros/jazzy/_local_setup_util* \
+                /tmp/pkg-root/opt/ros/jazzy/COLCON_IGNORE \
+                /tmp/pkg-root/opt/ros/jazzy/.colcon_install_layout
+
+          # 2. Stage Debian control directory and set standard permissions
+          mkdir -p /tmp/pkg-root/DEBIAN
+          find /tmp/pkg-root -type d -exec chmod 755 {} +
+
+          # 3. Generate DEBIAN/control file
+          cat << EOF | sed 's/^          //' > /tmp/pkg-root/DEBIAN/control
+          Package: ros-jazzy-ubiquity-core-utils
+          Version: ${CLEAN_VERSION}
+          Section: misc
+          Priority: optional
+          Architecture: all
+          Maintainer: Ubiquity Robotics <support@ubiquityrobotics.com>
+          Depends: ros-jazzy-ros-base, ros-jazzy-rclpy, ros-jazzy-geometry-msgs, ros-jazzy-nav-msgs, ros-jazzy-sensor-msgs, ros-jazzy-tf2-ros
+          Homepage: https://github.com/UbiquityRobotics/ubiquity_core_utils
+          Description: Ubiquity Robotics Core Telemetry and Utilities
+           Core runtime utilities for Magni robots, including /mcb/battery_state normalization
+           relay to /battery_state, /cmd_vel stamped bridge, and multi-MCB odometry aggregation.
+          EOF
+
+          # 4. Build .deb package
+          dpkg-deb --build --root-owner-group /tmp/pkg-root "${DEB_FILE}"
+          sha256sum "${DEB_FILE}" > "${DEB_FILE}.sha256"
+
+          echo "=== Package Metadata ==="
+          dpkg-deb -I "${DEB_FILE}"
+          echo "=== Executables & Shared Files ==="
+          dpkg-deb -c "${DEB_FILE}"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ros-jazzy-ubiquity-core-utils-all
+          path: |
+            ros-jazzy-ubiquity-core-utils_*.deb
+            ros-jazzy-ubiquity-core-utils_*.deb.sha256
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: ${{ steps.vars.outputs.tag == 'latest' && 'Ubiquity Core Utils Latest Rolling Release' || steps.vars.outputs.tag }}
+          prerelease: ${{ contains(steps.vars.outputs.tag, 'beta') || steps.vars.outputs.tag == 'latest' }}
+          files: |
+            ros-jazzy-ubiquity-core-utils_*.deb*
+          generate_release_notes: true

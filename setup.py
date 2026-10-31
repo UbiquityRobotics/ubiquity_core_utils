@@ -6,7 +6,7 @@ package_name = 'ubiquity_core_utils'
 
 setup(
     name=package_name,
-    version='0.1.0',
+    version='1.0.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -17,9 +17,12 @@ setup(
     ],
     install_requires=['setuptools'],
     zip_safe=True,
-    maintainer='Michael Valand',
-    maintainer_email='michael.valand@gmail.com',
-    description='Hardware bridge and telemetry utilities for Ubiquity Robotics Magni robots',
+    maintainer='Ubiquity Robotics',
+    maintainer_email='support@ubiquityrobotics.com',
+    description=(
+        'Core telemetry utilities, battery normalization relay, '
+        'and twist bridge for Ubiquity Robotics Magni platforms'
+    ),
     license='Apache-2.0',
     extras_require={
         'test': [
