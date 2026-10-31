@@ -1,0 +1,17 @@
+# Build and install artifacts
+build/
+install/
+log/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+
+# Pytest / cache
+.pytest_cache/
+.coverage
+htmlcov/

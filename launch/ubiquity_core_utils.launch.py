@@ -1,8 +1,9 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, EqualsSubstitution
+from launch.substitutions import EqualsSubstitution, LaunchConfiguration
 from launch_ros.actions import Node
+
 
 def generate_launch_description():
     # Declare the generation argument
@@ -28,7 +29,8 @@ def generate_launch_description():
         name='twist_bridge',
         output='screen',
         condition=IfCondition(EqualsSubstitution(LaunchConfiguration('generation'), 'gen5'))
-    )    
+    )
+
     return LaunchDescription([
         generation_arg,
         odom_node,
