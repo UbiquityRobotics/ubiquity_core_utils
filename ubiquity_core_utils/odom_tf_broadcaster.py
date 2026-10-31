@@ -3,17 +3,32 @@ from rclpy.node import Node
 from nav_msgs.msg import Odometry
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped
+from sensor_msgs.msg import BatteryState
 
 class OdomTFBroadcaster(Node):
     def __init__(self):
         super().__init__('odom_tf_broadcaster')
         self.tf_broadcaster = TransformBroadcaster(self)
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
+        
+        # Relay /mcb/battery_state to /battery_state for backwards compatibility
+        self.battery_pub = self.create_publisher(BatteryState, '/battery_state', 10)
+        self.battery_sub = self.create_subscription(
+            BatteryState, '/mcb/battery_state', self.battery_callback, 10
+        )
+        
         self.subs, self.msgs = {}, {}
         
         self.create_timer(5.0, self.discover_topics)
         self.discover_topics()
         self.create_timer(0.05, self.publish_avg)
+
+    def battery_callback(self, msg):
+        if msg.charge > 0.0 and msg.charge <= 100.0:
+            msg.percentage = float(msg.charge) / 100.0
+        elif msg.percentage > 1.0:
+            msg.percentage = float(msg.percentage) / 100.0
+        self.battery_pub.publish(msg)
 
     def discover_topics(self):
         for n, ty in self.get_topic_names_and_types():
@@ -54,4 +69,3 @@ def main():
     rclpy.init()
     rclpy.spin(OdomTFBroadcaster())
     rclpy.shutdown()
-
