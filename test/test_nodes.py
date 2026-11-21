@@ -127,3 +127,9 @@ def test_odometry_multi_mcb_averaging():
     assert math.isclose(res.pose.pose.position.x, 2.0, rel_tol=1e-3)
     assert math.isclose(res.pose.pose.orientation.w, 1.0, rel_tol=1e-3)
     node.destroy_node()
+
+
+def test_odom_tf_eager_subscription_before_discovery_timer():
+    node = OdomTFBroadcaster()
+    assert '/mcb/odometry' in node.subs
+    node.destroy_node()

@@ -1,5 +1,8 @@
+import signal
+
 from geometry_msgs.msg import Twist, TwistStamped
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 
 
@@ -32,13 +35,24 @@ def main(args=None):
     """Execute the TwistBridge node."""
     rclpy.init(args=args)
     node = TwistBridge()
+    stop_requested = False
+
+    def _on_signal(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
+        while rclpy.ok() and not stop_requested:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

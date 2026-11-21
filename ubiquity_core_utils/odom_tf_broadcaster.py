@@ -1,9 +1,11 @@
 import math
+import signal
 import time
 
 from geometry_msgs.msg import TransformStamped
 from nav_msgs.msg import Odometry
 import rclpy
+from rclpy.executors import ExternalShutdownException
 from rclpy.node import Node
 from sensor_msgs.msg import BatteryState
 from tf2_ros import TransformBroadcaster
@@ -41,10 +43,20 @@ class OdomTFBroadcaster(Node):
 
         self.subs = {}
         self.msgs = {}
+        self._discovery_fast = True
 
-        self.create_timer(5.0, self.discover_topics)
+        # Subscribe eagerly to canonical /mcb/odometry so /odom starts without waiting 5s
+        self._subscribe_odom_topic('/mcb/odometry')
+        self._discovery_timer = self.create_timer(0.5, self.discover_topics)
         self.discover_topics()
         self.create_timer(1.0 / rate, self.publish_odometry)
+
+    def _subscribe_odom_topic(self, topic: str):
+        if topic not in self.subs:
+            self.get_logger().info(f"Subscribing to MCB odometry topic: '{topic}'")
+            self.subs[topic] = self.create_subscription(
+                Odometry, topic, lambda m, t=topic: self._record_odom(t, m), 10
+            )
 
     def battery_callback(self, msg: BatteryState):
         """Relay and normalize battery telemetry for standard ROS 2 monitoring."""
@@ -57,13 +69,15 @@ class OdomTFBroadcaster(Node):
         self.battery_pub.publish(msg)
 
     def discover_topics(self):
-        """Discover active MCB odometry topics and register subscriptions."""
+        """Discover active MCB odometry topics and back off polling once traffic arrives."""
         for name, types in self.get_topic_names_and_types():
-            if 'nav_msgs/msg/Odometry' in types and 'mcb' in name and name not in self.subs:
-                self.get_logger().info(f"Subscribing to MCB odometry topic: '{name}'")
-                self.subs[name] = self.create_subscription(
-                    Odometry, name, lambda m, t=name: self._record_odom(t, m), 10
-                )
+            if 'nav_msgs/msg/Odometry' in types and 'mcb' in name:
+                self._subscribe_odom_topic(name)
+
+        if self._discovery_fast and self.msgs:
+            self._discovery_fast = False
+            self._discovery_timer.cancel()
+            self._discovery_timer = self.create_timer(5.0, self.discover_topics)
 
     def _record_odom(self, topic: str, msg: Odometry):
         self.msgs[topic] = (msg, time.monotonic())
@@ -136,13 +150,24 @@ def main(args=None):
     """Execute the OdomTFBroadcaster node."""
     rclpy.init(args=args)
     node = OdomTFBroadcaster()
+    stop_requested = False
+
+    def _on_signal(_signum, _frame):
+        nonlocal stop_requested
+        stop_requested = True
+
+    signal.signal(signal.SIGINT, _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
     try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
+        while rclpy.ok() and not stop_requested:
+            rclpy.spin_once(node, timeout_sec=0.1)
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
